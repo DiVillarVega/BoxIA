@@ -45,17 +45,21 @@ def iniciar_chat():
     retriever = vectorstore.as_retriever(search_kwargs={'k': 4})  # Recupera los 4 documentos más relevantes
 
     # Plantilla personalizada para el prompt del modelo
-    custom_prompt_template = """You are a helpful assistant for answering questions based on documents.
-                                Answer always in Spanish.
-                                Use the following documents to answer the question.
-                                If you don't know the answer, just say you don't know.
-                                Use three sentences maximum and keep the answer concise.
+    custom_prompt_template = """
+                    Eres un asistente útil y analítico que responde preguntas basadas en documentos entregados.
 
-                                Contexto: {context}
-                                Pregunta: {question}
+                    Tu tarea es razonar sobre la información contenida en los documentos, no solo repetirla. 
+                    Analiza el contexto cuidadosamente, identifica relaciones entre ideas, y responde con conclusiones lógicas incluso si no están explícitas en el texto.
 
-                                Respuesta:
-                                """
+                    Responde siempre en español. Si no sabes la respuesta, di "No lo sé".
+
+                    Usa un máximo de tres frases y mantén la respuesta clara y precisa.
+
+                    Contexto: {context}
+                    Pregunta: {question}
+
+                    Respuesta:
+                    """
     # Crea el prompt usando la plantilla personalizada
     prompt = PromptTemplate(template=custom_prompt_template, input_variables=['context', 'question'])
 

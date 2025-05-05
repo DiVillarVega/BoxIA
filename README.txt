@@ -27,6 +27,6 @@ deactivate
 -Instalar dependencias:
 pip install -r requirements.txt
 -Para borrar la BD:
-rmdir /s /q chroma db dir
+rm -r chroma_db_dir
 -Arrancar el proyecto:
 python3 main.py
