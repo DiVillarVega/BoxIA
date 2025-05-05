@@ -16,10 +16,14 @@ rmdir /s /q chroma_db_dir
 python main.py
 
 UBUNTU
+-Para boorrar el ambiente virtual anterior:
+rm -rf boxia-env
 -Para crear el ambiente virtual:
 python3 -m venv boxia-env
 -Para usar el ambiente virtual: 
 source boxia-env/bin/activate
+-Para desactivar el ambiente virtual:
+deactivate
 -Instalar dependencias:
 pip install -r requirements.txt
 -Para borrar la BD:
