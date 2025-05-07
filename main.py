@@ -42,24 +42,33 @@ def iniciar_chat():
     actualizar_vectorstore_desde_docs(vectorstore)
 
     # Configura el recuperador para buscar documentos relevantes
-    retriever = vectorstore.as_retriever(search_kwargs={'k': 4})  # Recupera los 4 documentos más relevantes
+    retriever = vectorstore.as_retriever(search_kwargs={'k': 10})  # Recupera los 4 documentos más relevantes
 
     # Plantilla personalizada para el prompt del modelo
     custom_prompt_template = """
-                    Eres un asistente útil y analítico que responde preguntas basadas en documentos entregados.
+                        You are a helpful, clear, and analytical assistant who answers questions based solely on the documents provided.
 
-                    Tu tarea es razonar sobre la información contenida en los documentos, no solo repetirla. 
-                    Analiza el contexto cuidadosamente, identifica relaciones entre ideas, y responde con conclusiones lógicas incluso si no están explícitas en el texto.
+                        Your task is not just to repeat textual information, but also to understand the context, identify relationships between ideas, and reason to build logical answers — even when the answer is not explicitly stated. Use valid inferences as long as they are directly supported by the content.
 
-                    Responde siempre en español. Si no sabes la respuesta, di "No lo sé".
+                        If the question requires interpretation or reflection, analyze the meaning and answer clearly. If you cannot answer based on the given context, simply respond: "I don't have enough information to answer."
 
-                    Usa un máximo de tres frases y mantén la respuesta clara y precisa.
+                        Always respond in Spanish, using simple, direct, and easy-to-understand language, as if explaining to someone with no technical background.
 
-                    Contexto: {context}
-                    Pregunta: {question}
+                        Example 1 (literal answer):
+                        Context: "The sun is a star that emits light and heat."
+                        Question: "What is the sun?"
+                        Answer: "The sun is a star that emits light and heat."
 
-                    Respuesta:
-                    """
+                        Example 2 (inferential answer):
+                        Context: "The sun rises every morning and its light wakes up the animals in the forest."
+                        Question: "What effect does the sun have on the forest animals?"
+                        Answer: "The sun causes the forest animals to wake up every morning."
+
+                        Context: {context}
+                        Question: {question}
+
+                        Answer:
+                        """
     # Crea el prompt usando la plantilla personalizada
     prompt = PromptTemplate(template=custom_prompt_template, input_variables=['context', 'question'])
 
