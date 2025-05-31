@@ -1,10 +1,12 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File
 from pydantic import BaseModel
 from langchain_community.llms import Ollama
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
 
 # Inicialización de FastAPI
@@ -83,3 +85,21 @@ qa = RetrievalQA.from_chain_type(
 def preguntar(p: Pregunta):
     respuesta = qa.invoke({"query": p.pregunta})
     return {"respuesta": respuesta['result']}
+
+@app.post("/cargar-documento")
+async def cargar_documento(archivo: UploadFile = File(...)):
+    if not archivo.filename.endswith(".pdf"):
+        return {"error": "Solo se permiten archivos PDF."}
+
+    ruta_temporal = f"docs/{archivo.filename}"
+    with open(ruta_temporal, "wb") as f:
+        f.write(await archivo.read())
+
+    loader = PyPDFLoader(ruta_temporal)
+    documentos = loader.load()
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    documentos_divididos = splitter.split_documents(documentos)
+
+    vectorstore.add_documents(documentos_divididos)
+
+    return {"mensaje": f"{archivo.filename} cargado exitosamente."}

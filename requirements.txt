@@ -6,3 +6,5 @@ chromadb>=0.4.24
 PyMuPDF>=1.23.22
 fastapi>=0.95.2
 uvicorn>=0.22.0
+pypdf>=3.17.0
+python-multipart>=0.0.6

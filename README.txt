@@ -30,3 +30,5 @@ pip install -r requirements.txt
 rm -r chroma_db_dir
 -Arrancar el proyecto:
 python3 main.py
+-Arrancar el proyecto desde la api:
+uvicorn api:app --reload
