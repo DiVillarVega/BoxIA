@@ -7,6 +7,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import CSVLoader
 import os
 
 # Inicialización de FastAPI
@@ -81,12 +82,17 @@ qa = RetrievalQA.from_chain_type(
     chain_type_kwargs={"prompt": prompt}
 )
 
+
+# Endpoint para preguntar
 @app.post("/preguntar")
 def preguntar(p: Pregunta):
     respuesta = qa.invoke({"query": p.pregunta})
     return {"respuesta": respuesta['result']}
 
-@app.post("/cargar-documento")
+
+
+# Endpoint para cargar documentos PDF
+@app.post("/cargar-documento-pdf")
 async def cargar_documento(archivo: UploadFile = File(...)):
     if not archivo.filename.endswith(".pdf"):
         return {"error": "Solo se permiten archivos PDF."}
@@ -97,6 +103,25 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     loader = PyPDFLoader(ruta_temporal)
     documentos = loader.load()
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    documentos_divididos = splitter.split_documents(documentos)
+
+    vectorstore.add_documents(documentos_divididos)
+
+    return {"mensaje": f"{archivo.filename} cargado exitosamente."}
+
+@app.post("/cargar-documento-csv")
+async def cargar_csv(archivo: UploadFile = File(...)):
+    if not archivo.filename.endswith(".csv"):
+        return {"error": "Solo se permiten archivos CSV."}
+
+    ruta_temporal = f"docs/{archivo.filename}"
+    with open(ruta_temporal, "wb") as f:
+        f.write(await archivo.read())
+
+    loader = CSVLoader(file_path=ruta_temporal)
+    documentos = loader.load()
+
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     documentos_divididos = splitter.split_documents(documentos)
 
