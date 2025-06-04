@@ -7,8 +7,9 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import CSVLoader
-from langchain_community.document_loaders import UnstructuredExcelLoader
+import pandas as pd
+from langchain.schema import Document
+import tempfile
 import os
 
 # Inicialización de FastAPI
@@ -26,7 +27,7 @@ vectorstore = Chroma(
     persist_directory="chroma_db_dir",
     collection_name="stanford_report_data"
 )
-retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
+retriever = vectorstore.as_retriever(search_kwargs={"k": 50})
 
 # Prompt personalizado
 prompt_template = """
@@ -89,14 +90,6 @@ qa = RetrievalQA.from_chain_type(
 def preguntar(p: Pregunta):
     # Recuperar documentos relevantes manualmente
     retrieved_docs = retriever.get_relevant_documents(p.pregunta)
-
-    # Log de chunks recuperados (imprime en consola)
-    print("\n\n🔍 Chunks recuperados:")
-    for i, doc in enumerate(retrieved_docs):
-        print(f"\n--- Chunk {i+1} ---")
-        print(doc.page_content)
-        print("-" * 40)
-
     # Invocar al sistema QA normalmente
     respuesta = qa.invoke({"query": p.pregunta})
 
@@ -123,22 +116,34 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     return {"mensaje": f"{archivo.filename} cargado exitosamente."}
 
-# Endpoint para cargar documentos xlsx
-@app.post("/cargar-documento-xlsx")
-async def cargar_excel(archivo: UploadFile = File(...)):
-    if not archivo.filename.endswith(".xlsx"):
-        return {"error": "Solo se permiten archivos XLSX."}
+@app.post("/cargar-documento-excel")
+async def cargar_documento_excel(archivo: UploadFile = File(...)):
+    if not archivo.filename.lower().endswith((".xls", ".xlsx")):
+        return {"error": "Solo se permiten archivos Excel (.xls, .xlsx)."}
 
-    ruta_temporal = f"docs/{archivo.filename}"
-    with open(ruta_temporal, "wb") as f:
-        f.write(await archivo.read())
+    try:
+        # Guardar archivo en carpeta docs
+        ruta_docs = "docs"
+        os.makedirs(ruta_docs, exist_ok=True)
+        ruta_guardar = os.path.join(ruta_docs, archivo.filename)
 
-    loader = UnstructuredExcelLoader(ruta_temporal)
-    documentos = loader.load()
+        with open(ruta_guardar, "wb") as f:
+            f.write(await archivo.read())
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    documentos_divididos = splitter.split_documents(documentos)
+        # Leer con pandas usando la ruta guardada
+        extension = archivo.filename.split(".")[-1].lower()
+        engine = "openpyxl" if extension == "xlsx" else "xlrd"
+        df = pd.read_excel(ruta_guardar, engine=engine)
 
-    vectorstore.add_documents(documentos_divididos)
+        texto = df.to_string(index=False)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        documentos_divididos = splitter.split_text(texto)
 
-    return {"mensaje": f"{archivo.filename} cargado exitosamente."}
+        docs = [Document(page_content=chunk) for chunk in documentos_divididos]
+        vectorstore.add_documents(docs)
+
+        return {"mensaje": f"{archivo.filename} cargado exitosamente."}
+
+    except Exception as e:
+        return {"error": f"Error al procesar el archivo: {str(e)}"}
+
