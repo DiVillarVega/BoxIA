@@ -103,7 +103,7 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     loader = PyPDFLoader(ruta_temporal)
     documentos = loader.load()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
     documentos_divididos = splitter.split_documents(documentos)
 
     vectorstore.add_documents(documentos_divididos)
@@ -122,7 +122,7 @@ async def cargar_csv(archivo: UploadFile = File(...)):
     loader = CSVLoader(file_path=ruta_temporal)
     documentos = loader.load()
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
     documentos_divididos = splitter.split_documents(documentos)
 
     vectorstore.add_documents(documentos_divididos)
