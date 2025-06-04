@@ -8,6 +8,7 @@ from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import CSVLoader
+from langchain_community.document_loaders import UnstructuredExcelLoader
 import os
 
 # Inicialización de FastAPI
@@ -25,7 +26,7 @@ vectorstore = Chroma(
     persist_directory="chroma_db_dir",
     collection_name="stanford_report_data"
 )
-retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
 
 # Prompt personalizado
 prompt_template = """
@@ -86,7 +87,19 @@ qa = RetrievalQA.from_chain_type(
 # Endpoint para preguntar
 @app.post("/preguntar")
 def preguntar(p: Pregunta):
+    # Recuperar documentos relevantes manualmente
+    retrieved_docs = retriever.get_relevant_documents(p.pregunta)
+
+    # Log de chunks recuperados (imprime en consola)
+    print("\n\n🔍 Chunks recuperados:")
+    for i, doc in enumerate(retrieved_docs):
+        print(f"\n--- Chunk {i+1} ---")
+        print(doc.page_content)
+        print("-" * 40)
+
+    # Invocar al sistema QA normalmente
     respuesta = qa.invoke({"query": p.pregunta})
+
     return {"respuesta": respuesta['result']}
 
 
@@ -103,26 +116,27 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     loader = PyPDFLoader(ruta_temporal)
     documentos = loader.load()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     documentos_divididos = splitter.split_documents(documentos)
 
     vectorstore.add_documents(documentos_divididos)
 
     return {"mensaje": f"{archivo.filename} cargado exitosamente."}
 
-@app.post("/cargar-documento-csv")
-async def cargar_csv(archivo: UploadFile = File(...)):
-    if not archivo.filename.endswith(".csv"):
-        return {"error": "Solo se permiten archivos CSV."}
+# Endpoint para cargar documentos xlsx
+@app.post("/cargar-documento-xlsx")
+async def cargar_excel(archivo: UploadFile = File(...)):
+    if not archivo.filename.endswith(".xlsx"):
+        return {"error": "Solo se permiten archivos XLSX."}
 
     ruta_temporal = f"docs/{archivo.filename}"
     with open(ruta_temporal, "wb") as f:
         f.write(await archivo.read())
 
-    loader = CSVLoader(file_path=ruta_temporal)
+    loader = UnstructuredExcelLoader(ruta_temporal)
     documentos = loader.load()
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     documentos_divididos = splitter.split_documents(documentos)
 
     vectorstore.add_documents(documentos_divididos)
