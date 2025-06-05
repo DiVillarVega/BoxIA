@@ -7,9 +7,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import pandas as pd
-from langchain.schema import Document
-import tempfile
+from langchain_community.document_loaders import CSVLoader
 import os
 
 # Inicialización de FastAPI
@@ -27,7 +25,7 @@ vectorstore = Chroma(
     persist_directory="chroma_db_dir",
     collection_name="stanford_report_data"
 )
-retriever = vectorstore.as_retriever(search_kwargs={"k": 50})
+retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
 # Prompt personalizado
 prompt_template = """
@@ -88,11 +86,7 @@ qa = RetrievalQA.from_chain_type(
 # Endpoint para preguntar
 @app.post("/preguntar")
 def preguntar(p: Pregunta):
-    # Recuperar documentos relevantes manualmente
-    retrieved_docs = retriever.get_relevant_documents(p.pregunta)
-    # Invocar al sistema QA normalmente
     respuesta = qa.invoke({"query": p.pregunta})
-
     return {"respuesta": respuesta['result']}
 
 
@@ -109,41 +103,28 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     loader = PyPDFLoader(ruta_temporal)
     documentos = loader.load()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
     documentos_divididos = splitter.split_documents(documentos)
 
     vectorstore.add_documents(documentos_divididos)
 
     return {"mensaje": f"{archivo.filename} cargado exitosamente."}
 
-@app.post("/cargar-documento-excel")
-async def cargar_documento_excel(archivo: UploadFile = File(...)):
-    if not archivo.filename.lower().endswith((".xls", ".xlsx")):
-        return {"error": "Solo se permiten archivos Excel (.xls, .xlsx)."}
+@app.post("/cargar-documento-csv")
+async def cargar_csv(archivo: UploadFile = File(...)):
+    if not archivo.filename.endswith(".csv"):
+        return {"error": "Solo se permiten archivos CSV."}
 
-    try:
-        # Guardar archivo en carpeta docs
-        ruta_docs = "docs"
-        os.makedirs(ruta_docs, exist_ok=True)
-        ruta_guardar = os.path.join(ruta_docs, archivo.filename)
+    ruta_temporal = f"docs/{archivo.filename}"
+    with open(ruta_temporal, "wb") as f:
+        f.write(await archivo.read())
 
-        with open(ruta_guardar, "wb") as f:
-            f.write(await archivo.read())
+    loader = CSVLoader(file_path=ruta_temporal)
+    documentos = loader.load()
 
-        # Leer con pandas usando la ruta guardada
-        extension = archivo.filename.split(".")[-1].lower()
-        engine = "openpyxl" if extension == "xlsx" else "xlrd"
-        df = pd.read_excel(ruta_guardar, engine=engine)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+    documentos_divididos = splitter.split_documents(documentos)
 
-        texto = df.to_string(index=False)
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        documentos_divididos = splitter.split_text(texto)
+    vectorstore.add_documents(documentos_divididos)
 
-        docs = [Document(page_content=chunk) for chunk in documentos_divididos]
-        vectorstore.add_documents(docs)
-
-        return {"mensaje": f"{archivo.filename} cargado exitosamente."}
-
-    except Exception as e:
-        return {"error": f"Error al procesar el archivo: {str(e)}"}
-
+    return {"mensaje": f"{archivo.filename} cargado exitosamente."}
