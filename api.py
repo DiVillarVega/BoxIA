@@ -7,7 +7,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import CSVLoader
+from langchain.schema import Document
 import os
 
 # Inicialización de FastAPI
@@ -25,7 +25,7 @@ vectorstore = Chroma(
     persist_directory="chroma_db_dir",
     collection_name="stanford_report_data"
 )
-retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
 
 # Prompt personalizado
 prompt_template = """
@@ -44,6 +44,9 @@ prompt_template = """
                         Si la pregunta requiere interpretación o análisis, hazlo **dentro del marco de información que te entregan los documentos**.
 
                         Responde **siempre en español**, con un lenguaje claro, simple y directo, como si explicaras a alguien sin conocimientos técnicos.
+
+                        De vez en cuando se te cargarán documentos que simularán tablas. La primera línea serán siempre las cabeceras de las columnas y luego irán hacia abajo los datos. Para identificar entre una columna y otra se usarán tabulaciones.
+                        Por ejemplo, "VENTA ID". Esas son 2 columnas, por un lado la columna VENTA y por el otro ID, todos los datos que estén hacia abajo separados por tabulaciones corresponden a cada una de estas columnas respectivamente.
 
                         ### Ejemplos
 
@@ -103,26 +106,29 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     loader = PyPDFLoader(ruta_temporal)
     documentos = loader.load()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=100)
     documentos_divididos = splitter.split_documents(documentos)
 
     vectorstore.add_documents(documentos_divididos)
 
     return {"mensaje": f"{archivo.filename} cargado exitosamente."}
 
-@app.post("/cargar-documento-csv")
-async def cargar_csv(archivo: UploadFile = File(...)):
-    if not archivo.filename.endswith(".csv"):
-        return {"error": "Solo se permiten archivos CSV."}
+@app.post("/cargar-documento-txt")
+async def cargar_txt(archivo: UploadFile = File(...)):
+    if not archivo.filename.endswith(".txt"):
+        return {"error": "Solo se permiten archivos TXT."}
 
     ruta_temporal = f"docs/{archivo.filename}"
     with open(ruta_temporal, "wb") as f:
         f.write(await archivo.read())
 
-    loader = CSVLoader(file_path=ruta_temporal)
-    documentos = loader.load()
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+    with open(ruta_temporal, "r", encoding="latin-1") as f:
+        lineas = f.readlines()
+
+    documentos = [Document(page_content=line.strip().replace("\t", " ")) for line in lineas if line.strip()]
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=100)
     documentos_divididos = splitter.split_documents(documentos)
 
     vectorstore.add_documents(documentos_divididos)
