@@ -133,6 +133,7 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     return {"mensaje": f"{archivo.filename} cargado exitosamente."}
 
+# Endpoint para cargar documentos TXT
 @app.post("/cargar-documento-txt")
 async def cargar_txt(archivo: UploadFile = File(...)):
     if not archivo.filename.endswith(".txt"):
