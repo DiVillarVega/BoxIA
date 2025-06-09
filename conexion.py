@@ -7,4 +7,12 @@ conexion = psycopg2.connect(
     port="5432"
 )
 
+cursor = conexion.cursor()
+cursor.execute("SELECT * FROM reported_questions")
+resultados = cursor.fetchall()
+for fila in resultados:
+    print(fila)
+cursor.close()
+conexion.close()
+
 
