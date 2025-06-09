@@ -7,7 +7,9 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from datetime import date
+from conexion import conexion
+from fastapi import HTTPException
 import os
 
 # Inicialización de FastAPI
@@ -138,26 +140,22 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     return {"mensaje": f"{archivo.filename} cargado exitosamente."}
 
-# Endpoint para cargar documentos TXT
-@app.post("/cargar-documento-txt")
-async def cargar_txt(archivo: UploadFile = File(...)):
-    if not archivo.filename.endswith(".txt"):
-        return {"error": "Solo se permiten archivos TXT."}
-
-    ruta_temporal = f"docs/{archivo.filename}"
-    with open(ruta_temporal, "wb") as f:
-        f.write(await archivo.read())
-
-
-    with open(ruta_temporal, "r", encoding="latin-1") as f:
-        lineas = f.readlines()
-
-    documentos = [Document(page_content=line.strip().replace("\t", " ")) for line in lineas if line.strip()]
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200)
-    documentos_divididos = splitter.split_documents(documentos)
-
-    vectorstore.add_documents(documentos_divididos)
-    vectorstore.persist()
-
-    return {"mensaje": f"{archivo.filename} cargado exitosamente."}
+# Endpoint recibir reporte de preguntas sin respuesta
+class ReportePregunta(BaseModel):
+    pregunta: str
+    respuesta: str
+    
+@app.post("/reportar-pregunta")
+def reportar_pregunta(data: ReportePregunta):
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("""
+            INSERT INTO reported_questions (question, answer, reported_date)
+            VALUES (%s, %s, %s)
+        """, (data.pregunta, data.respuesta, date.today()))
+        conexion.commit()
+        cursor.close()
+        return {"mensaje": "Pregunta reportada exitosamente"}
+    except Exception as e:
+        print("Error al reportar pregunta:", e)
+        raise HTTPException(status_code=500, detail="Error al guardar la pregunta")
