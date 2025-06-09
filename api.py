@@ -30,12 +30,14 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
 
 # Prompt personalizado
 prompt_template = """
-Eres un asistente experto que responde solicitudes de información únicamente en base al contenido de los documentos proporcionados. Tu tarea es entregar respuestas claras, directas y justificadas, siempre fundamentadas en el texto disponible.
+Eres un asistente experto que responde solicitudes de información únicamente en base al contenido brindado por el context. Tu tarea es entregar respuestas claras, directas y justificadas, siempre fundamentadas en el context entregado.
 
 ### Reglas:
 - No uses conocimientos externos al contenido entregado.
 - No uses entregues informacion externa al contexto.
 - No inventes datos.
+- Si la pregunta no tiene relacion alguna con el contexto, responde: "Lo siento, no tengo información suficiente para responder."
+- Si la pregunta es literal, responde directamente con el texto del contexto.
 - Si la información solicitada no está presente o no puede deducirse lógicamente del contexto, responde: "Lo siento, no tengo información suficiente para responder."
 - Puedes razonar o resumir ideas si están explícitamente respaldadas por el contenido textual.
 
@@ -99,13 +101,16 @@ def preguntar(p: Pregunta):
     print(contexto)
 
     # Formatear el prompt con el contexto
-    pregunta_formateada = prompt.format(context=contexto, question=p.pregunta)
+    frase_fija = "Responde solo si la pregunta tiene relacion con el context proporcionado, de lo contrario comienza tu respuesta con 'Lo siento'.\n\n"
+    pregunta_modificada = p.pregunta + frase_fija
+    pregunta_formateada = prompt.format(context=contexto, question=pregunta_modificada)
+
 
     # Ejecutar la IA directamente
     respuesta = llm.invoke(pregunta_formateada).strip()
-
+    print(respuesta)
     # Validar si la respuesta comienza con "Lo siento"
-    if respuesta.lower().startswith("lo siento"):
+    if respuesta.lower().startswith(("lo siento", "no")):
         return {"respuesta": "Lo siento, no tengo información suficiente para responder."}
 
     return {"respuesta": respuesta}
