@@ -27,53 +27,51 @@ vectorstore = Chroma(
 )
 retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
 
+
 # Prompt personalizado
 prompt_template = """
-                        Eres un asistente útil, claro y analítico que **solo puede responder preguntas basándose en la información contenida en los documentos proporcionados**. No tienes acceso a conocimientos generales ni a información externa, y no debes hacer suposiciones sin justificación directa en los textos.
+Eres un asistente experto que responde solicitudes de información únicamente en base al contenido de los documentos proporcionados. Tu tarea es entregar respuestas claras, directas y justificadas, siempre fundamentadas en el texto disponible.
 
-                        ### Instrucciones clave:
-                        - Tu conocimiento está **limitado únicamente** al contenido textual de los documentos cargados.
-                        - **No debes utilizar conocimientos previos** que no estén expresamente en los textos.
-                        - Si una pregunta no puede responderse con base en los documentos, responde con: **"No tengo suficiente información para responder."**
-                        - No rellenes vacíos con suposiciones. No inventes. No des definiciones que no estén explícitas o razonablemente inferidas del contenido.
-                        - **No digas nada** que no se sustente clara y directamente en los documentos.
+### Reglas:
+- No uses conocimientos externos al contenido entregado.
+- No uses entregues informacion externa al contexto.
+- No inventes datos.
+- Si la información solicitada no está presente o no puede deducirse lógicamente del contexto, responde: "Lo siento, no tengo información suficiente para responder."
+- Puedes razonar o resumir ideas si están explícitamente respaldadas por el contenido textual.
 
-                        ### Tu objetivo:
-                        No solo repetir lo que dicen los textos, sino **comprender el contexto**, **identificar relaciones entre ideas**, y **razonar** para construir respuestas lógicas — siempre respaldadas por el contenido entregado.
+### Ejemplos
 
-                        Si la pregunta requiere interpretación o análisis, hazlo **dentro del marco de información que te entregan los documentos**.
+**Solicitud literal:**
+- Contexto: "El sol es una estrella que emite luz y calor."
+- Solicitud: "Indica qué es el sol."
+- Respuesta: "El sol es una estrella que emite luz y calor."
 
-                        Responde **siempre en español**, con un lenguaje claro, simple y directo, como si explicaras a alguien sin conocimientos técnicos.
+**Solicitud inferencial:**
+- Contexto: "El sol sale cada mañana y su luz despierta a los animales del bosque."
+- Solicitud: "Explica el efecto del sol sobre los animales del bosque."
+- Respuesta: "El sol hace que los animales del bosque se despierten cada mañana."
 
-                        De vez en cuando se te cargarán documentos que simularán tablas. La primera línea serán siempre las cabeceras de las columnas y luego irán hacia abajo los datos. Para identificar entre una columna y otra se usarán tabulaciones.
-                        Por ejemplo, "VENTA ID". Esas son 2 columnas, por un lado la columna VENTA y por el otro ID, todos los datos que estén hacia abajo separados por tabulaciones corresponden a cada una de estas columnas respectivamente.
+**Sin información suficiente (aunque haya contexto):**
+- Contexto: "La Constitución establece que todos los ciudadanos tienen derecho a voto."
+- Solicitud: "¿Quién descubrió América?"
+- Respuesta: "Lo siento, no tengo información suficiente para responder."
 
-                        ### Ejemplos
+---
 
-                        **Respuesta literal:**
-                        - Contexto: "El sol es una estrella que emite luz y calor."
-                        - Pregunta: "¿Qué es el sol?"
-                        - Respuesta: "El sol es una estrella que emite luz y calor."
+### Contexto:
+{context}
 
-                        **Respuesta inferencial:**
-                        - Contexto: "El sol sale cada mañana y su luz despierta a los animales del bosque."
-                        - Pregunta: "¿Qué efecto tiene el sol sobre los animales del bosque?"
-                        - Respuesta: "El sol hace que los animales del bosque se despierten cada mañana."
+### Solicitud:
+{question}
 
-                        **Respuesta cuando falta información:**
-                        - Pregunta: "¿Quién descubrió América?"
-                        - Respuesta: "No tengo suficiente información para responder."
+### Respuesta:
+"""
 
-                        ---
 
-                        **Contexto:**  
-                        {context}
 
-                        **Pregunta:**  
-                        {question}
 
-                        **Respuesta:**
-                        """
+
+
 
 prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
 
@@ -86,11 +84,32 @@ qa = RetrievalQA.from_chain_type(
 )
 
 
+
 # Endpoint para preguntar
 @app.post("/preguntar")
 def preguntar(p: Pregunta):
-    respuesta = qa.invoke({"query": p.pregunta})
-    return {"respuesta": respuesta['result']}
+    # Obtener documentos relevantes
+    documentos_relacionados = retriever.get_relevant_documents(p.pregunta)
+
+    # Unir el contenido de los documentos en un solo string
+    contexto = "\n\n".join([doc.page_content for doc in documentos_relacionados])
+
+    # Mostrar el contexto en consola (debug)
+    print("=== CONTEXTO ===")
+    print(contexto)
+
+    # Formatear el prompt con el contexto
+    pregunta_formateada = prompt.format(context=contexto, question=p.pregunta)
+
+    # Ejecutar la IA directamente
+    respuesta = llm.invoke(pregunta_formateada).strip()
+
+    # Validar si la respuesta comienza con "Lo siento"
+    if respuesta.lower().startswith("lo siento"):
+        return {"respuesta": "Lo siento, no tengo información suficiente para responder."}
+
+    return {"respuesta": respuesta}
+
 
 
 
@@ -106,10 +125,11 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     loader = PyPDFLoader(ruta_temporal)
     documentos = loader.load()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=100)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200)
     documentos_divididos = splitter.split_documents(documentos)
 
     vectorstore.add_documents(documentos_divididos)
+    vectorstore.persist()
 
     return {"mensaje": f"{archivo.filename} cargado exitosamente."}
 
@@ -128,9 +148,10 @@ async def cargar_txt(archivo: UploadFile = File(...)):
 
     documentos = [Document(page_content=line.strip().replace("\t", " ")) for line in lineas if line.strip()]
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=100)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200)
     documentos_divididos = splitter.split_documents(documentos)
 
     vectorstore.add_documents(documentos_divididos)
+    vectorstore.persist()
 
     return {"mensaje": f"{archivo.filename} cargado exitosamente."}
