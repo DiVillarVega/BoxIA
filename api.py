@@ -1,4 +1,8 @@
+#api.py
 from fastapi import FastAPI, Request, UploadFile, File
+from fastapi.responses import FileResponse
+from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_community.llms import Ollama
 from langchain_community.vectorstores import Chroma
@@ -7,9 +11,11 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from datetime import date
 from conexion import conexion
-from fastapi import HTTPException
+from datetime import datetime
+from openpyxl import Workbook
+import io
+import pandas as pd
 import os
 
 # Inicialización de FastAPI
@@ -152,10 +158,156 @@ def reportar_pregunta(data: ReportePregunta):
         cursor.execute("""
             INSERT INTO reported_questions (question, answer, reported_date)
             VALUES (%s, %s, %s)
-        """, (data.pregunta, data.respuesta, date.today()))
+        """, (data.pregunta, data.respuesta, datetime.now()))
         conexion.commit()
         cursor.close()
         return {"mensaje": "Pregunta reportada exitosamente"}
     except Exception as e:
         print("Error al reportar pregunta:", e)
         raise HTTPException(status_code=500, detail="Error al guardar la pregunta")
+
+
+#En
+@app.get("/preguntas-reportadas")
+def listar_preguntas_reportadas(revisadas: bool = False):
+    """
+    Devuelve en JSON las preguntas reportadas.
+    Parámetro opcional:
+      - revisadas: False (por defecto) → solo checked = FALSE
+                   True  → todas (checked TRUE/FALSE)
+    """
+    try:
+        cursor = conexion.cursor()
+        if revisadas:
+            cursor.execute("""
+                SELECT id, question, answer, reported_date, checked
+                FROM reported_questions
+                ORDER BY reported_date DESC
+            """)
+        else:
+            cursor.execute("""
+                SELECT id, question, answer, reported_date, checked
+                FROM reported_questions
+                WHERE checked = FALSE
+                ORDER BY reported_date DESC
+            """)
+        rows = cursor.fetchall()
+        cursor.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error al consultar la base de datos")
+
+    # Mapeamos a lista de dict
+    result = [
+        {
+            "id":      r[0],
+            "pregunta":r[1],
+            "respuesta":r[2],
+            "fecha":   r[3].isoformat(),
+            "checked": r[4],
+        }
+        for r in rows
+    ]
+
+    if not result:
+        raise HTTPException(status_code=404, detail="No hay preguntas reportadas")
+
+    return result
+
+#Endpoint para exportar preguntas reportadas a Excel
+
+
+@app.get("/exportar-preguntas")
+def exportar_preguntas_excel(revisadas: bool = False):
+    try:
+        cursor = conexion.cursor()
+        if revisadas:
+            cursor.execute("""
+                SELECT id, question
+                FROM reported_questions
+                ORDER BY reported_date DESC
+            """)
+        else:
+            cursor.execute("""
+                SELECT id, question
+                FROM reported_questions
+                WHERE checked = FALSE
+                ORDER BY reported_date DESC
+            """)
+        rows = cursor.fetchall()
+        cursor.close()
+
+        if not rows:
+            raise HTTPException(status_code=404, detail="No hay preguntas reportadas.")
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Respuestas"
+
+        # Encabezados
+        ws.append(["ID", "Pregunta"])
+
+        # Datos
+        for r in rows:
+            ws.append([r[0], r[1]])  # Se debe de responde en la misma celda de la pregunta
+
+        stream = io()
+        wb.save(stream)
+        stream.seek(0)
+
+        return StreamingResponse(
+            stream,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=preguntas_respuestas.xlsx"}
+        )
+
+    except Exception as e:
+        print("Error exportando preguntas:", e)
+        raise HTTPException(status_code=500, detail="Error al generar el archivo Excel.")
+    
+@app.post("/subir-respuestas-excel")
+async def subir_respuestas_excel(file: UploadFile = File(...)):
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Archivo no válido. Solo se aceptan archivos Excel.")
+
+    try:
+        content = await file.read()
+        df = pd.read_excel(io.BytesIO(content))
+
+        # Validar columnas
+        expected_cols = {"ID", "Pregunta"}
+        if not expected_cols.issubset(df.columns):
+            raise HTTPException(status_code=400, detail=f"El archivo Excel debe contener las columnas: {expected_cols}")
+
+        cursor = conexion.cursor()
+
+        for _, row in df.iterrows():
+            id_pregunta = row["ID"]
+            pregunta_completa = row["Pregunta"]  # Esta ya incluye la respuesta en la misma celda
+
+            # 1. Marcar como revisada en PostgreSQL
+            cursor.execute("""
+                UPDATE reported_questions
+                SET checked = TRUE
+                WHERE id = %s
+            """, (id_pregunta,))
+
+            # 2. Agregar pregunta + respuesta como nuevo documento en ChromaDB (sin metadata)
+            from langchain.schema import Document
+
+            nuevo_doc = Document(
+                page_content=pregunta_completa  # Solo el texto
+            )
+            vectorstore.add_documents([nuevo_doc])
+
+
+        conexion.commit()
+        cursor.close()
+
+        # Persistir cambios en vectorstore
+        vectorstore.persist()
+
+        return {"mensaje": "Preguntas marcadas como revisadas y vectorstore actualizado."}
+
+    except Exception as e:
+        print(f"Error procesando archivo Excel: {e}")
+        raise HTTPException(status_code=500, detail="Error al procesar el archivo Excel.")
