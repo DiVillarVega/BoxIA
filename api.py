@@ -10,6 +10,7 @@ from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
+from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from conexion import conexion
 from datetime import datetime
@@ -151,24 +152,51 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 class ReportePregunta(BaseModel):
     pregunta: str
     respuesta: str
-    
+
 @app.post("/reportar-pregunta")
 def reportar_pregunta(data: ReportePregunta):
     try:
+        pregunta_normalizada = data.pregunta.strip().lower()
         cursor = conexion.cursor()
+
+        # 1. Verifica si la pregunta ya existe (sin distinguir mayúsculas/minúsculas)
         cursor.execute("""
-            INSERT INTO reported_questions (question, answer, reported_date)
-            VALUES (%s, %s, %s)
-        """, (data.pregunta, data.respuesta, datetime.now()))
-        conexion.commit()
-        cursor.close()
-        return {"mensaje": "Pregunta reportada exitosamente"}
+            SELECT id, checked 
+            FROM reported_questions 
+            WHERE LOWER(question) = %s
+        """, (pregunta_normalizada,))
+        resultado = cursor.fetchone()
+
+        if resultado:
+            id_pregunta, checked = resultado
+
+            if not checked:
+                cursor.close()
+                return {"mensaje": "Esta pregunta ya ha sido reportada y está en revisión."}
+            else:
+                cursor.execute("""
+                    UPDATE reported_questions
+                    SET answer = %s, checked = FALSE, reported_date = %s
+                    WHERE id = %s
+                """, (data.respuesta, datetime.now(), id_pregunta))
+                conexion.commit()
+                cursor.close()
+                return {"mensaje": "Pregunta actualizada y marcada nuevamente como pendiente de revisión."}
+        else:
+            cursor.execute("""
+                INSERT INTO reported_questions (question, answer, reported_date)
+                VALUES (%s, %s, %s)
+            """, (pregunta_normalizada, data.respuesta, datetime.now()))
+            conexion.commit()
+            cursor.close()
+            return {"mensaje": "Pregunta reportada exitosamente."}
     except Exception as e:
         print("Error al reportar pregunta:", e)
         raise HTTPException(status_code=500, detail="Error al guardar la pregunta")
 
 
-#En
+
+# Endpoint para listar preguntas reportadas
 @app.get("/preguntas-reportadas")
 def listar_preguntas_reportadas(revisadas: bool = False):
     """
