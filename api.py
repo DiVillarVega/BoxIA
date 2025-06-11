@@ -17,6 +17,7 @@ from openpyxl import Workbook
 import io
 import pandas as pd
 import os
+from pydantic import BaseModel
 
 # Inicialización de FastAPI
 app = FastAPI(title="BoxIA API Local")
@@ -208,14 +209,31 @@ def listar_preguntas_reportadas(revisadas: bool = False):
         for r in rows
     ]
 
-    if not result:
-        raise HTTPException(status_code=404, detail="No hay preguntas reportadas")
 
     return result
 
+
+class MarcarRevisada(BaseModel):
+    id: int
+
+@app.post("/marcar-revisado")
+def marcar_revisada(data: MarcarRevisada):
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("""
+            UPDATE reported_questions
+            SET checked = TRUE
+            WHERE id = %s
+        """, (data.id,))
+        conexion.commit()
+        cursor.close()
+        return {"mensaje": f"Pregunta con ID {data.id} marcada como revisada."}
+    except Exception as e:
+        print("Error al marcar como revisada:", e)
+        raise HTTPException(status_code=500, detail="Error al actualizar el estado de la pregunta.")
+
+
 #Endpoint para exportar preguntas reportadas a Excel
-
-
 @app.get("/exportar-preguntas")
 def exportar_preguntas_excel(revisadas: bool = False):
     try:
@@ -250,7 +268,7 @@ def exportar_preguntas_excel(revisadas: bool = False):
         for r in rows:
             ws.append([r[0], r[1]])  # Se debe de responde en la misma celda de la pregunta
 
-        stream = io()
+        stream = io.BytesIO()
         wb.save(stream)
         stream.seek(0)
 
