@@ -16,6 +16,7 @@ from conexion import conexion
 from datetime import datetime
 from openpyxl import Workbook
 import io
+import re
 import pandas as pd
 import os
 from pydantic import BaseModel
@@ -111,7 +112,7 @@ def preguntar(p: Pregunta):
     print(contexto)
 
     # Formatear el prompt con el contexto
-    frase_fija = "Responde solo si la pregunta tiene relacion con el context proporcionado, de lo contrario comienza tu respuesta con 'Lo siento'.\n\n"
+    frase_fija = "Responde solo si la pregunta/solicitud tiene relacion con el context proporcionado, de lo contrario comienza tu respuesta con 'Lo siento'.\n\n"
     pregunta_modificada = p.pregunta + frase_fija
     pregunta_formateada = prompt.format(context=contexto, question=pregunta_modificada)
 
@@ -129,6 +130,19 @@ def preguntar(p: Pregunta):
 
 
 # Endpoint para cargar documentos PDF
+# Función de limpieza del texto
+def limpiar_texto(texto: str) -> str:
+    # Quitar múltiples saltos de línea
+    texto = re.sub(r'\n+', '\n', texto)
+    # Eliminar encabezados o pies de página típicos (ajustar si es necesario)
+    texto = re.sub(r'Página \d+|\d+ de \d+', '', texto, flags=re.IGNORECASE)
+    # Unir líneas fragmentadas que no terminan en punto, signo de interrogación o exclamación
+    texto = re.sub(r'(?<![.?!])\n', ' ', texto)
+    # Quitar espacios redundantes
+    texto = re.sub(r'\s+', ' ', texto)
+    return texto.strip()
+
+
 @app.post("/cargar-documento-pdf")
 async def cargar_documento(archivo: UploadFile = File(...)):
     if not archivo.filename.endswith(".pdf"):
@@ -140,14 +154,21 @@ async def cargar_documento(archivo: UploadFile = File(...)):
 
     loader = PyPDFLoader(ruta_temporal)
     documentos = loader.load()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200)
-    documentos_divididos = splitter.split_documents(documentos)
+
+    # Limpieza del texto de cada documento
+    documentos_limpios = []
+    for doc in documentos:
+        texto_limpio = limpiar_texto(doc.page_content)
+        doc.page_content = texto_limpio
+        documentos_limpios.append(doc)
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=300)
+    documentos_divididos = splitter.split_documents(documentos_limpios)
 
     vectorstore.add_documents(documentos_divididos)
     vectorstore.persist()
 
-    return {"mensaje": f"{archivo.filename} cargado exitosamente."}
-
+    return {"mensaje": f"{archivo.filename} cargado exitosamente con limpieza aplicada."}
 # Endpoint recibir reporte de preguntas sin respuesta
 class ReportePregunta(BaseModel):
     pregunta: str
