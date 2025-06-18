@@ -36,7 +36,7 @@ vectorstore = Chroma(
     persist_directory="chroma_db_dir",
     collection_name="stanford_report_data"
 )
-retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
+retriever = vectorstore.as_retriever(search_kwargs={"k": 15})
 
 
 # Prompt personalizado
@@ -112,7 +112,9 @@ def preguntar(p: Pregunta):
     print(contexto)
 
     # Formatear el prompt con el contexto
-    frase_fija = "Responde solo si la pregunta/solicitud tiene relacion con el context proporcionado, de lo contrario comienza tu respuesta con 'Lo siento'.\n\n"
+    frase_fija = ("\n\nIMPORTANTE: Si la pregunta no tiene relación con el contexto entregado, "
+    "responde exactamente con: 'Lo siento, no tengo información suficiente para responder.'")
+
     pregunta_modificada = p.pregunta + frase_fija
     pregunta_formateada = prompt.format(context=contexto, question=pregunta_modificada)
 
@@ -162,14 +164,15 @@ async def cargar_documento(archivo: UploadFile = File(...)):
         doc.page_content = texto_limpio
         documentos_limpios.append(doc)
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=300)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1800, chunk_overlap=500)
     documentos_divididos = splitter.split_documents(documentos_limpios)
 
     vectorstore.add_documents(documentos_divididos)
     vectorstore.persist()
 
     return {"mensaje": f"{archivo.filename} cargado exitosamente con limpieza aplicada."}
-# Endpoint recibir reporte de preguntas sin respuesta
+
+#  1. Endpoint para reportar pregunta
 class ReportePregunta(BaseModel):
     pregunta: str
     respuesta: str
@@ -180,7 +183,6 @@ def reportar_pregunta(data: ReportePregunta):
         pregunta_normalizada = data.pregunta.strip().lower()
         cursor = conexion.cursor()
 
-        # 1. Verifica si la pregunta ya existe (sin distinguir mayúsculas/minúsculas)
         cursor.execute("""
             SELECT id, checked 
             FROM reported_questions 
@@ -189,15 +191,14 @@ def reportar_pregunta(data: ReportePregunta):
         resultado = cursor.fetchone()
 
         if resultado:
-            id_pregunta, checked = resultado
-
-            if not checked:
+            id_pregunta, estado = resultado
+            if estado == 'reportada':
                 cursor.close()
                 return {"mensaje": "Esta pregunta ya ha sido reportada y está en revisión."}
             else:
                 cursor.execute("""
                     UPDATE reported_questions
-                    SET answer = %s, checked = FALSE, reported_date = %s
+                    SET answer = %s, checked = 'reportada', reported_date = %s
                     WHERE id = %s
                 """, (data.respuesta, datetime.now(), id_pregunta))
                 conexion.commit()
@@ -205,63 +206,64 @@ def reportar_pregunta(data: ReportePregunta):
                 return {"mensaje": "Pregunta actualizada y marcada nuevamente como pendiente de revisión."}
         else:
             cursor.execute("""
-                INSERT INTO reported_questions (question, answer, reported_date)
-                VALUES (%s, %s, %s)
+                INSERT INTO reported_questions (question, answer, reported_date, checked)
+                VALUES (%s, %s, %s, 'reportada')
             """, (pregunta_normalizada, data.respuesta, datetime.now()))
             conexion.commit()
             cursor.close()
             return {"mensaje": "Pregunta reportada exitosamente."}
     except Exception as e:
-        print("Error al reportar pregunta:", e)
         raise HTTPException(status_code=500, detail="Error al guardar la pregunta")
 
 
-
-# Endpoint para listar preguntas reportadas
+#  2. Endpoint para listar preguntas reportadas
 @app.get("/preguntas-reportadas")
-def listar_preguntas_reportadas(revisadas: bool = False):
+def listar_preguntas_reportadas(estado: str = "reportada"):
     """
-    Devuelve en JSON las preguntas reportadas.
-    Parámetro opcional:
-      - revisadas: False (por defecto) → solo checked = FALSE
-                   True  → todas (checked TRUE/FALSE)
+    Devuelve una lista de preguntas reportadas según el estado:
+    - "reportada"
+    - "revisada"
+    - "eliminada"
+    - "todas" → sin filtro
     """
+    estado = estado.lower()
+    estados_validos = {"reportada", "revisada", "eliminada", "todas"}
+
+    if estado not in estados_validos:
+        raise HTTPException(status_code=400, detail=f"Estado inválido. Debe ser uno de: {estados_validos}")
+
     try:
         cursor = conexion.cursor()
-        if revisadas:
-            cursor.execute("""
-                SELECT id, question, answer, reported_date, checked
-                FROM reported_questions
-                ORDER BY reported_date DESC
-            """)
-        else:
-            cursor.execute("""
-                SELECT id, question, answer, reported_date, checked
-                FROM reported_questions
-                WHERE checked = FALSE
-                ORDER BY reported_date DESC
-            """)
+
+        
+        cursor.execute("""
+            SELECT id, question, answer, reported_date, checked, expert_answer
+            FROM reported_questions
+            WHERE checked = %s
+            ORDER BY reported_date DESC
+        """, (estado,))
+
         rows = cursor.fetchall()
         cursor.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail="Error al consultar la base de datos")
 
-    # Mapeamos a lista de dict
+    # Mapear a lista de diccionarios
     result = [
         {
-            "id":      r[0],
-            "pregunta":r[1],
-            "respuesta":r[2],
-            "fecha":   r[3].isoformat(),
-            "checked": r[4],
+            "id": r[0],
+            "pregunta": r[1],
+            "respuesta": r[2],
+            "fecha": r[3].isoformat(),
+            "estado": r[4],
+            "respuesta_experto": r[5]
         }
         for r in rows
     ]
 
-
     return result
 
-
+#  3. Endpoint para marcar revisada
 class MarcarRevisada(BaseModel):
     id: int
 
@@ -271,51 +273,52 @@ def marcar_revisada(data: MarcarRevisada):
         cursor = conexion.cursor()
         cursor.execute("""
             UPDATE reported_questions
-            SET checked = TRUE
+            SET checked = 'revisada'
             WHERE id = %s
         """, (data.id,))
         conexion.commit()
         cursor.close()
         return {"mensaje": f"Pregunta con ID {data.id} marcada como revisada."}
     except Exception as e:
-        print("Error al marcar como revisada:", e)
         raise HTTPException(status_code=500, detail="Error al actualizar el estado de la pregunta.")
 
 
-#Endpoint para exportar preguntas reportadas a Excel
 @app.get("/exportar-preguntas")
-def exportar_preguntas_excel(revisadas: bool = False):
+def exportar_preguntas_excel(estado: str = "reportada"):
+    """
+    Exporta preguntas reportadas según su estado en un archivo Excel:
+    - "reportada"
+    - "revisada"
+    - "eliminada"
+    """
+    estado = estado.lower()
+    estados_validos = {"reportada", "revisada", "eliminada"}
+
+    if estado not in estados_validos:
+        raise HTTPException(status_code=400, detail=f"Estado inválido. Debe ser uno de: {estados_validos}")
+
     try:
         cursor = conexion.cursor()
-        if revisadas:
-            cursor.execute("""
-                SELECT id, question
-                FROM reported_questions
-                ORDER BY reported_date DESC
-            """)
-        else:
-            cursor.execute("""
-                SELECT id, question
-                FROM reported_questions
-                WHERE checked = FALSE
-                ORDER BY reported_date DESC
-            """)
+        cursor.execute("""
+            SELECT id, question, expert_answer
+            FROM reported_questions
+            WHERE checked = %s
+            ORDER BY reported_date DESC
+        """, (estado,))
         rows = cursor.fetchall()
         cursor.close()
 
         if not rows:
-            raise HTTPException(status_code=404, detail="No hay preguntas reportadas.")
+            raise HTTPException(status_code=404, detail="No hay preguntas reportadas con ese estado.")
 
+        # Crear Excel
         wb = Workbook()
         ws = wb.active
-        ws.title = "Respuestas"
+        ws.title = f"Preguntas {estado.capitalize()}"
+        ws.append(["ID", "Pregunta", "Respuesta Experto"])
 
-        # Encabezados
-        ws.append(["ID", "Pregunta"])
-
-        # Datos
         for r in rows:
-            ws.append([r[0], r[1]])  # Se debe de responde en la misma celda de la pregunta
+            ws.append([r[0], r[1], r[2] or ""])
 
         stream = io.BytesIO()
         wb.save(stream)
@@ -324,13 +327,14 @@ def exportar_preguntas_excel(revisadas: bool = False):
         return StreamingResponse(
             stream,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=preguntas_respuestas.xlsx"}
+            headers={"Content-Disposition": f"attachment; filename=preguntas_{estado}.xlsx"}
         )
 
     except Exception as e:
-        print("Error exportando preguntas:", e)
         raise HTTPException(status_code=500, detail="Error al generar el archivo Excel.")
-    
+
+
+#  5. Subir respuestas del experto desde Excel
 @app.post("/subir-respuestas-excel")
 async def subir_respuestas_excel(file: UploadFile = File(...)):
     if not file.filename.endswith((".xlsx", ".xls")):
@@ -340,41 +344,139 @@ async def subir_respuestas_excel(file: UploadFile = File(...)):
         content = await file.read()
         df = pd.read_excel(io.BytesIO(content))
 
-        # Validar columnas
-        expected_cols = {"ID", "Pregunta"}
+        expected_cols = {"ID", "Pregunta", "Respuesta Experto"}
         if not expected_cols.issubset(df.columns):
-            raise HTTPException(status_code=400, detail=f"El archivo Excel debe contener las columnas: {expected_cols}")
+            raise HTTPException(status_code=400, detail=f"El archivo debe contener las columnas: {expected_cols}")
 
         cursor = conexion.cursor()
 
+        from langchain.schema import Document
+        docs = []
+        ids = []
+
         for _, row in df.iterrows():
             id_pregunta = row["ID"]
-            pregunta_completa = row["Pregunta"]  # Esta ya incluye la respuesta en la misma celda
+            pregunta = row["Pregunta"]
+            respuesta_experto = row["Respuesta Experto"]
 
-            # 1. Marcar como revisada en PostgreSQL
-            cursor.execute("""
-                UPDATE reported_questions
-                SET checked = TRUE
-                WHERE id = %s
-            """, (id_pregunta,))
+            if pd.notna(respuesta_experto):
+                # Actualizar en la base de datos
+                cursor.execute("""
+                    UPDATE reported_questions
+                    SET expert_answer = %s, checked = 'revisada'
+                    WHERE id = %s
+                """, (respuesta_experto, id_pregunta))
 
-            # 2. Agregar pregunta + respuesta como nuevo documento en ChromaDB (sin metadata)
-            from langchain.schema import Document
+                # Crear documento con metadata e ID personalizado
+                doc = Document(
+                    page_content=f"{pregunta}\n{respuesta_experto}",
+                    metadata={"source": "experto", "id": str(id_pregunta)}
+                )
+                docs.append(doc)
+                ids.append(str(id_pregunta))
 
-            nuevo_doc = Document(
-                page_content=pregunta_completa  # Solo el texto
-            )
-            vectorstore.add_documents([nuevo_doc])
-
+        # Agregar al vectorstore con IDs personalizados
+        if docs:
+            vectorstore.add_documents(docs, ids=ids)
+            vectorstore.persist()
 
         conexion.commit()
         cursor.close()
 
-        # Persistir cambios en vectorstore
-        vectorstore.persist()
-
-        return {"mensaje": "Preguntas marcadas como revisadas y vectorstore actualizado."}
+        return {"mensaje": "Respuestas del experto registradas y vectorstore actualizado."}
 
     except Exception as e:
-        print(f"Error procesando archivo Excel: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Error al procesar el archivo Excel.")
+
+
+#  6. Eliminar pregunta del postgreSQL
+class EliminarDefinitivo(BaseModel):
+    id: int
+
+@app.post("/eliminar-pregunta")
+def eliminar_definitivo(data: EliminarDefinitivo):
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("DELETE FROM reported_questions WHERE id = %s", (data.id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Pregunta no encontrada.")
+        conexion.commit()
+        cursor.close()
+        return {"mensaje": f"Pregunta con ID {data.id} eliminada de la base de datos."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error al eliminar la pregunta desde PostgreSQL.")
+    
+#  7. Endpoint para eliminar pregunta del vectorstore
+class EliminarDeChroma(BaseModel):
+    id: int
+
+@app.post("/eliminar-de-chroma")
+def eliminar_de_chroma(data: EliminarDeChroma):
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("SELECT id FROM reported_questions WHERE id = %s", (data.id,))
+        row = cursor.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Pregunta no encontrada.")
+
+        vectorstore.delete(ids=[str(data.id)])
+
+        cursor.execute("""
+            UPDATE reported_questions
+            SET checked = 'eliminada'
+            WHERE id = %s
+        """, (data.id,))
+        conexion.commit()
+        cursor.close()
+
+        vectorstore.persist()
+        return {"mensaje": "Respuesta eliminada de Chroma y estado actualizado a 'reportada'."}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error al eliminar de Chroma: {str(e)}")
+
+
+#  8. Endpoint para reactivar pregunta eliminada de la vectorstore
+class ReactivarPregunta(BaseModel):
+    id: int
+
+@app.post("/reactivar-pregunta")
+def reactivar_pregunta(data: ReactivarPregunta):
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("""
+            UPDATE reported_questions
+            SET checked = 'reportada'
+            WHERE id = %s
+        """, (data.id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Pregunta no encontrada.")
+        conexion.commit()
+        cursor.close()
+        return {"mensaje": f"Pregunta con ID {data.id} reactivada como 'reportada'."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error al reactivar la pregunta.")
+    
+#  9. Endpoint para marcar pregunta como revisada
+@app.post("/marcar-revisado")
+def marcar_revisada(data: MarcarRevisada):
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("""
+            UPDATE reported_questions
+            SET checked = 'revisada'
+            WHERE id = %s
+        """, (data.id,))
+        conexion.commit()
+        cursor.close()
+        return {"mensaje": f"Pregunta con ID {data.id} marcada como revisada."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error al actualizar el estado de la pregunta.")
+
+
+
