@@ -29,7 +29,10 @@ class Pregunta(BaseModel):
     pregunta: str
 
 # Inicialización de modelos y recursos (solo una vez al arrancar)
-llm = Ollama(model="llama3.1")  # modelo Ollama local
+llm = Ollama(
+    model="llama3.1",
+    base_url=os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")  # Usa variable de entorno por defecto
+)
 embed_model = FastEmbedEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 vectorstore = Chroma(
     embedding_function=embed_model,

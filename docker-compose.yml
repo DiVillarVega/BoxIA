@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_DB: boxia_db
+      POSTGRES_USER: boxia_user
+      POSTGRES_PASSWORD: boxia
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres_init/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    entrypoint: >
+      /bin/sh -c "ollama serve & sleep 10 && ollama pull llama3.1 && tail -f /dev/null"
+
+  boxia:
+    build: .
+    restart: always
+    depends_on:
+      - postgres
+      - ollama
+    environment:
+      POSTGRES_DB: boxia_db
+      POSTGRES_USER: boxia_user
+      POSTGRES_PASSWORD: boxia
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      OLLAMA_BASE_URL: http://ollama:11434
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./docs:/app/docs
+      - ./chroma_db_dir:/app/chroma_db_dir
+
+volumes:
+  pgdata:
+  ollama_models:
