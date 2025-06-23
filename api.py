@@ -1,4 +1,3 @@
-#api.py
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import FileResponse
 from fastapi import HTTPException
@@ -12,6 +11,43 @@ from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+import psycopg2
+import time
+
+# --- CREA SIEMPRE LA TABLA DE REPORTES AL INICIAR ---
+def ensure_table_exists():
+    for _ in range(10):
+        try:
+            conn = psycopg2.connect(
+                dbname="boxia_db",
+                user="boxia_user",
+                password="boxia",
+                host="postgres"
+            )
+            break
+        except psycopg2.OperationalError:
+            time.sleep(2)
+    else:
+        raise Exception("No se pudo conectar a la base de datos después de varios intentos.")
+
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reported_questions (
+        id SERIAL PRIMARY KEY,
+        question VARCHAR,
+        answer VARCHAR,
+        expert_answer TEXT,
+        reported_date TIMESTAMP,
+        checked VARCHAR(20)
+    );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+ensure_table_exists()
+# --- FIN BLOQUE AUTO TABLA ---
+
 from conexion import conexion
 from datetime import datetime
 from openpyxl import Workbook
@@ -19,8 +55,6 @@ import io
 import re
 import pandas as pd
 import os
-from pydantic import BaseModel
-
 # Inicialización de FastAPI
 app = FastAPI(title="BoxIA API Local")
 
@@ -29,10 +63,12 @@ class Pregunta(BaseModel):
     pregunta: str
 
 # Inicialización de modelos y recursos (solo una vez al arrancar)
+
 llm = Ollama(
     model="llama3.1",
-    base_url=os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")  # Usa variable de entorno por defecto
+    base_url="http://ollama:11434"
 )
+
 embed_model = FastEmbedEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 vectorstore = Chroma(
     embedding_function=embed_model,
@@ -110,21 +146,17 @@ def preguntar(p: Pregunta):
     # Unir el contenido de los documentos en un solo string
     contexto = "\n\n".join([doc.page_content for doc in documentos_relacionados])
 
-    # Mostrar el contexto en consola (debug)
-    print("=== CONTEXTO ===")
-    print(contexto)
 
     # Formatear el prompt con el contexto
     frase_fija = ("\n\nIMPORTANTE: Si la pregunta no tiene relación con el contexto entregado, "
     "responde exactamente con: 'Lo siento, no tengo información suficiente para responder.'")
 
-    pregunta_modificada = p.pregunta + frase_fija
+    pregunta_modificada = frase_fija + p.pregunta
     pregunta_formateada = prompt.format(context=contexto, question=pregunta_modificada)
 
 
     # Ejecutar la IA directamente
     respuesta = llm.invoke(pregunta_formateada).strip()
-    print(respuesta)
     # Validar si la respuesta comienza con "Lo siento"
     if respuesta.lower().startswith(("lo siento", "no")):
         return {"respuesta": "Lo siento, no tengo información suficiente para responder."}
@@ -139,7 +171,7 @@ def preguntar(p: Pregunta):
 def limpiar_texto(texto: str) -> str:
     # Quitar múltiples saltos de línea
     texto = re.sub(r'\n+', '\n', texto)
-    # Eliminar encabezados o pies de página típicos (ajustar si es necesario)
+    # Eliminar encabezados o pies de página típicos
     texto = re.sub(r'Página \d+|\d+ de \d+', '', texto, flags=re.IGNORECASE)
     # Unir líneas fragmentadas que no terminan en punto, signo de interrogación o exclamación
     texto = re.sub(r'(?<![.?!])\n', ' ', texto)
@@ -352,13 +384,13 @@ async def subir_respuestas_excel(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail=f"El archivo debe contener las columnas: {expected_cols}")
 
         cursor = conexion.cursor()
-
-        from langchain.schema import Document
         docs = []
         ids = []
 
+        splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=600)
+
         for _, row in df.iterrows():
-            id_pregunta = row["ID"]
+            id_pregunta = str(row["ID"])
             pregunta = row["Pregunta"]
             respuesta_experto = row["Respuesta Experto"]
 
@@ -370,15 +402,19 @@ async def subir_respuestas_excel(file: UploadFile = File(...)):
                     WHERE id = %s
                 """, (respuesta_experto, id_pregunta))
 
-                # Crear documento con metadata e ID personalizado
-                doc = Document(
-                    page_content=f"{pregunta}\n{respuesta_experto}",
-                    metadata={"source": "experto", "id": str(id_pregunta)}
-                )
-                docs.append(doc)
-                ids.append(str(id_pregunta))
+                texto = f"{pregunta} {respuesta_experto}"
+                chunks = splitter.create_documents([texto])
 
-        # Agregar al vectorstore con IDs personalizados
+                for i, chunk in enumerate(chunks):
+                    for j in range(12):
+                        doc = Document(
+                            page_content=chunk.page_content,
+                            metadata={"source": "experto", "id": f"{id_pregunta}-{i}-{j}"}
+                        )
+                        docs.append(doc)
+                        ids.append(f"{id_pregunta}-{i}-{j}")
+
+        # Agregar documentos al vectorstore
         if docs:
             vectorstore.add_documents(docs, ids=ids)
             vectorstore.persist()
@@ -386,7 +422,7 @@ async def subir_respuestas_excel(file: UploadFile = File(...)):
         conexion.commit()
         cursor.close()
 
-        return {"mensaje": "Respuestas del experto registradas y vectorstore actualizado."}
+        return {"mensaje": "Respuestas del experto registradas, divididas y repetidas 5 veces por chunk."}
 
     except Exception as e:
         import traceback
@@ -418,15 +454,20 @@ class EliminarDeChroma(BaseModel):
 @app.post("/eliminar-de-chroma")
 def eliminar_de_chroma(data: EliminarDeChroma):
     try:
+        id_base = str(data.id)
+
+        # Recuperar todos los documentos y filtrar por los que comienzan con el ID base
+        all_docs = vectorstore.get()
+        ids_a_eliminar = [doc_id for doc_id in all_docs['ids'] if doc_id.startswith(f"{id_base}-")]
+
+        if not ids_a_eliminar:
+            raise HTTPException(status_code=404, detail="No se encontraron chunks en Chroma con ese ID.")
+
+        vectorstore.delete(ids=ids_a_eliminar)
+        vectorstore.persist()
+
+        # Actualizar estado en la base de datos
         cursor = conexion.cursor()
-        cursor.execute("SELECT id FROM reported_questions WHERE id = %s", (data.id,))
-        row = cursor.fetchone()
-
-        if not row:
-            raise HTTPException(status_code=404, detail="Pregunta no encontrada.")
-
-        vectorstore.delete(ids=[str(data.id)])
-
         cursor.execute("""
             UPDATE reported_questions
             SET checked = 'eliminada'
@@ -435,8 +476,7 @@ def eliminar_de_chroma(data: EliminarDeChroma):
         conexion.commit()
         cursor.close()
 
-        vectorstore.persist()
-        return {"mensaje": "Respuesta eliminada de Chroma y estado actualizado a 'reportada'."}
+        return {"mensaje": f"Eliminados {len(ids_a_eliminar)} chunks de Chroma para ID {id_base}."}
 
     except Exception as e:
         import traceback

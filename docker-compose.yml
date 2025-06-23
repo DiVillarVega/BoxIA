@@ -3,46 +3,65 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15
+    container_name: boxia-postgres-1
     restart: always
     environment:
-      POSTGRES_DB: boxia_db
       POSTGRES_USER: boxia_user
       POSTGRES_PASSWORD: boxia
+      POSTGRES_DB: boxia_db
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./postgres_init/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - boxia_pgdata:/var/lib/postgresql/data
+      - ./postgres_init/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boxia_user -d boxia_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   ollama:
     image: ollama/ollama
     container_name: ollama
+    restart: always
+    # SOLO si tienes GPU y ya tienes nvidia toolkit instalado:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    entrypoint: >
+      /bin/sh -c "ollama serve & sleep 10 && ollama pull llama3.1 && tail -f /dev/null"
     ports:
       - "11434:11434"
     volumes:
       - ollama_models:/root/.ollama
-    entrypoint: >
-      /bin/sh -c "ollama serve & sleep 10 && ollama pull llama3.1 && tail -f /dev/null"
 
   boxia:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: boxia-boxia-1
     restart: always
-    depends_on:
-      - postgres
-      - ollama
-    environment:
-      POSTGRES_DB: boxia_db
-      POSTGRES_USER: boxia_user
-      POSTGRES_PASSWORD: boxia
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      OLLAMA_BASE_URL: http://ollama:11434
     ports:
       - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    environment:
+      # Variables si las usas en tu app
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: boxia_user
+      POSTGRES_PASSWORD: boxia
+      POSTGRES_DB: boxia_db
     volumes:
-      - ./docs:/app/docs
       - ./chroma_db_dir:/app/chroma_db_dir
+      - ./docs:/app/docs
 
 volumes:
-  pgdata:
+  boxia_pgdata:
   ollama_models:
