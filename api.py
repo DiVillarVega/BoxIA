@@ -148,8 +148,7 @@ def preguntar(p: Pregunta):
 
 
     # Formatear el prompt con el contexto
-    frase_fija = ("\n\nIMPORTANTE: Si la pregunta no tiene relación con el contexto entregado, "
-    "responde exactamente con: 'Lo siento, no tengo información suficiente para responder.'")
+    frase_fija = ("Responde solo si la pregunta/solicitud tiene relacion con el context proporcionado, de lo contrario responde exactamente con: 'Lo siento, no tengo información suficiente para responder.'")
 
     pregunta_modificada = frase_fija + p.pregunta
     pregunta_formateada = prompt.format(context=contexto, question=pregunta_modificada)
