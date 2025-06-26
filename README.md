@@ -216,9 +216,9 @@ volumes:
 
 ---
 
-## 🔌 Comandos utilies para el backend
+## ⚙️ Comandos utilies para el backend
 ```bash
--Para boorrar el ambiente virtual anterior:
+-Para borrar el ambiente virtual anterior:
 rm -rf boxia-env
 -Para crear el ambiente virtual:
 python3 -m venv boxia-env
@@ -255,7 +255,8 @@ Esta interfaz gráfica permite a los usuarios hacer preguntas directamente al si
 
 ### 🖥️ Vista general
 
-![interfaz_usuario_general](imagenes/interfaz_usuario_general.png)
+![interfaz_usuario_general](img/Chatbot.png)
+![interfaz_usuario_general_reporte](img/Chatbot2.png)
 
 ---
 
@@ -283,7 +284,7 @@ Esta interfaz gráfica permite a los usuarios hacer preguntas directamente al si
 
 - Interfaz **oscura y moderna** con soporte para scroll y texto seleccionable.
 - Autoajuste dinámico del área de entrada al crecer el texto.
-- Uso de íconos como 🤖 y 💬 para mejorar la experiencia visual.
+- Uso de íconos como 💬 para mejorar la experiencia visual.
 
 ---
 ## 🧠 Interfaz de Usuario Experto: `interfaz_docs.py` + `manage_reports.py`
@@ -291,16 +292,16 @@ Esta interfaz gráfica permite a los usuarios hacer preguntas directamente al si
 Esta sección está dedicada a los usuarios con rol experto. Incluye herramientas para cargar documentos y gestionar preguntas reportadas por los usuarios generales. Ambas interfaces están desarrolladas con **PyQt6** y se conectan al backend mediante peticiones HTTP.
 
 📁 Archivos:
-- `interfaz_docs.py`: carga de documentos PDF/TXT y acceso a la gestión de reportes.
+- `interfaz_docs.py`: carga de documentos PDF y acceso a la gestión de reportes.
 - `manage_reports.py`: gestión completa de preguntas reportadas.
 
 ---
 
 ### 📂 Carga de Documentos
 
-![interfaz_experto_carga](imagenes/interfaz_experto_carga.png)
+![interfaz_experto_carga](img/Experto_docs.png)
 
-- Permite seleccionar archivos `.pdf` o `.txt` y subirlos al sistema vía `/cargar-documento-pdf` o `/cargar-documento-txt`.
+- Permite seleccionar archivos `.pdf` y subirlos al sistema vía `/cargar-documento-pdf`.
 - Muestra el estado de carga en tiempo real.
 - Contiene un botón adicional para abrir la ventana de gestión de reportes.
 
@@ -308,7 +309,7 @@ Esta sección está dedicada a los usuarios con rol experto. Incluye herramienta
 
 ### 📝 Gestión de Preguntas Reportadas
 
-![interfaz_experto_reportes](imagenes/interfaz_experto_reportes.png)
+![interfaz_experto_reportes](img/experto.png)
 
 Desde `manage_reports.py`, se puede:
 
@@ -325,7 +326,7 @@ Según el estado del reporte, se habilitan diferentes botones:
 
 | Estado      | Acciones Disponibles                                   |
 |-------------|--------------------------------------------------------|
-| Reportada   | ✔️ Marcar como revisada<br>🗑️ Eliminar de Postgresql       |
+| Reportada   | ✔️ Marcar como revisada<br>🗑️ Eliminar de Postgresql   |
 | Revisada    | 🗑️ Eliminar de Chroma<br>🔄 Reactivar como reportada   |
 | Eliminada   | 🔄 Reactivar como reportada                            |
 
@@ -338,4 +339,58 @@ Según el estado del reporte, se habilitan diferentes botones:
 
 ---
 
+## ⚙️ Comandos utilies para el frontend
+```bash
+Comandos para UsuarioExperto
 
+-Para borrar el ambiente virtual anterior:
+rm -rf docs-env
+-Para crear el ambiente virtual:
+python3 -m venv docs-env
+-Para usar el ambiente virtual: 
+source docs-env/bin/activate
+-Para desactivar el ambiente virtual:
+deactivate
+-Instalar dependencias:
+pip install -r requirements.txt
+-Arrancar la interfaz:
+python3 interfaz_docs.py
+-Generar portable de la interfaz:
+pyinstaller --onefile --windowed --name BoxIA-Experto interfaz_docs.py
+
+Comandos para UsuarioGeneral
+
+UBUNTU
+-Para borrar el ambiente virtual anterior:
+rm -rf chat-env
+-Para crear el ambiente virtual:
+python3 -m venv chat-env
+-Para usar el ambiente virtual: 
+source chat-env/bin/activate
+-Para desactivar el ambiente virtual:
+deactivate
+-Instalar dependencias:
+pip install -r requirements.txt
+-Arrancar la interfaz:
+python3 interfaz_chat.py
+-Generar portable del chat:
+pyinstaller --onefile --windowed --name BoxIA-Chat interfaz_chat.py
+
+```
+
+                                                                  ,--,                                                                              
+                                                               ,---.'|                                                    .--,-``-.                 
+    ,---,.                         ,---,   ,---,               |   | :     ,--,                         ____             /   /     '.         ,---, 
+  ,'  .'  \                     ,`--.' |  '  .' \              :   : |   ,--.'|                       ,'  , `.          / ../        ;     ,`--.' | 
+,---.' .' |   ,---.             |   :  : /  ;    '.            |   ' :   |  | :                    ,-+-,.' _ |          \ ``\  .`-    '   /    /  : 
+|   |  |: |  '   ,'\ ,--,  ,--, :   |  ':  :       \           ;   ; '   :  : '                 ,-+-. ;   , ||           \___\/   \   :  :    |.' ' 
+:   :  :  / /   /   ||'. \/ .`| |   :  |:  |   /\   \          '   | |__ |  ' |     ,--.--.    ,--.'|'   |  || ,--.--.        \   :   |  `----':  | 
+:   |    ; .   ; ,. :'  \/  / ; '   '  ;|  :  ' ;.   :         |   | :.'|'  | |    /       \  |   |  ,', |  |,/       \       /  /   /      '   ' ; 
+|   :     \'   | |: : \  \.' /  |   |  ||  |  ;/  \   \        '   :    ;|  | :   .--.  .-. | |   | /  | |--'.--.  .-. |      \  \   \      |   | | 
+|   |   . |'   | .; :  \  ;  ;  '   :  ;'  :  | \  \ ,'        |   |  ./ '  : |__  \__\/: . . |   : |  | ,    \__\/: . .  ___ /   :   |     '   : ; 
+'   :  '; ||   :    | / \  \  \ |   |  '|  |  '  '--'          ;   : ;   |  | '.'| ," .--.; | |   : |  |/     ," .--.; | /   /\   /   :     |   | ' 
+|   |  | ;  \   \  /./__;   ;  \'   :  ||  :  :                |   ,/    ;  :    ;/  /  ,.  | |   | |`-'     /  /  ,.  |/ ,,/  ',-    .___  '   : | 
+|   :   /    `----' |   :/\  \ ;;   |.' |  | ,'                '---'     |  ,   /;  :   .'   \|   ;/        ;  :   .'   \ ''\        ;/  .\ ;   |.' 
+|   | ,'            `---'  `--` '---'   `--''                             ---`-' |  ,     .-./'---'         |  ,     .-./\   \     .' \  ; |'---'   
+`----'                                                                            `--`---'                   `--`---'     `--`-,,-'    `--"         
+                                                                                                                                                    
