@@ -128,7 +128,7 @@ BoxIA/
 
 ## 🧠 Autores y créditos
 
-- Desarrollado por [Tu Nombre o Equipo]
+- Desarrollado por [BoxIA Team]
 - IA local: [Ollama Llama 3.1 8B]
 - Base vectorial: ChromaDB
 - Base de datos: PostgreSQL
@@ -137,5 +137,4 @@ BoxIA/
 ---
 
 ¡Disfruta tu instancia de BoxIA!\
-¿Dudas o errores? Abre un issue o contáctame.
 
