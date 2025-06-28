@@ -339,7 +339,7 @@ Según el estado del reporte, se habilitan diferentes botones:
 
 ---
 
-## ⚙️ Comandos utilies para el frontend
+## ⚙️ Comandos utiles para el frontend
 ```bash
 Comandos para UsuarioExperto
 
