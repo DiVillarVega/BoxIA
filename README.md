@@ -216,7 +216,7 @@ volumes:
 
 ---
 
-## ⚙️ Comandos utilies para el backend
+## ⚙️ Comandos utiles para el backend
 ```bash
 -Para borrar el ambiente virtual anterior:
 rm -rf boxia-env
